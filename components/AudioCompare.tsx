@@ -204,21 +204,6 @@ const AudioCompare = () => {
     setIsPlaying(!isPlaying);
   };
   
-  // Handle zoom level change
-  const handleZoomChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const value = parseInt(e.target.value, 10);
-    setZoomLevel(value);
-    
-    // Apply zoom directly if wavesurfer instance exists and not loading
-    if (wavesurferRef.current && !isChangingTrackRef.current && !isLoading) {
-      try {
-        wavesurferRef.current.zoom(value);
-      } catch (error) {
-        console.error("Error applying zoom:", error);
-      }
-    }
-  };
-  
   // Format time display (MM:SS)
   const formatTime = (time: number) => {
     const minutes = Math.floor(time / 60);
@@ -263,26 +248,23 @@ const AudioCompare = () => {
         </div>
       </div>
       
-      <div className="flex flex-col md:flex-row justify-between items-center gap-4 mb-4">
-        
-        <div className="flex items-center gap-4">
-          <div className="text-gray-700 font-mono">
-            {formatTime(currentTime)}
-          </div>
-          
-          <button
-            onClick={togglePlayPause}
-            disabled={isLoading}
-            className={`
-              px-6 py-2 rounded-md transition-colors duration-200 text-white
-              ${!isLoading
-                ? 'bg-blue-600 hover:bg-blue-700 cursor-pointer' 
-                : 'bg-blue-300 cursor-not-allowed'}
-            `}
-          >
-            {isPlaying ? 'Pause' : 'Play'}
-          </button>
+      <div className="flex justify-center items-center gap-4">
+        <div className="text-gray-700 font-mono">
+          {formatTime(currentTime)}
         </div>
+        
+        <button
+          onClick={togglePlayPause}
+          disabled={isLoading}
+          className={`
+            px-6 py-2 rounded-md transition-colors duration-200 text-white
+            ${!isLoading
+              ? 'bg-blue-600 hover:bg-blue-700 cursor-pointer' 
+              : 'bg-blue-300 cursor-not-allowed'}
+          `}
+        >
+          {isPlaying ? 'Pause' : 'Play'}
+        </button>
       </div>
     </div>
   );
