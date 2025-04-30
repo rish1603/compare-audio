@@ -1,4 +1,4 @@
-import AudioCompare from '@/components/AudioCompare';
+import AudioCompare from '../components/AudioCompare';
 
 export default function Home() {
   return (
