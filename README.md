@@ -1,6 +1,13 @@
 # Compare Audio
 
-A Next.js application with Tailwind CSS.
+A Next.js application for comparing different versions of audio files with an interactive waveform visualization using wavesurfer.js.
+
+## Features
+
+- Switch between different audio versions (A, B, X) with a single click
+- Visual waveform representation of each audio file
+- Synchronized playback when switching between versions
+- Simple and intuitive UI with Tailwind CSS
 
 ## Getting Started
 
@@ -25,6 +32,15 @@ pnpm dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+
+### Adding Audio Files
+
+Place your audio files in the `public` directory with the following names:
+- `A.mp3` - First audio version
+- `B.mp3` - Second audio version
+- `X.mp3` - Third audio version
+
+Make sure all files are of the same length for the best experience.
 
 ## Deployment with Vercel
 
@@ -52,4 +68,5 @@ Or simply click the "Deploy with Vercel" button on the homepage to deploy throug
 - [Next.js](https://nextjs.org/)
 - [Tailwind CSS](https://tailwindcss.com/)
 - [TypeScript](https://www.typescriptlang.org/)
+- [wavesurfer.js](https://wavesurfer.xyz/)
 - [Vercel](https://vercel.com/)
