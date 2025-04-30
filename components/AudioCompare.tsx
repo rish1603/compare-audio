@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from 'react';
 import WaveSurfer from 'wavesurfer.js';
 import Zoom from 'wavesurfer.js/dist/plugins/zoom.esm.js';
+import Minimap from 'wavesurfer.js/dist/plugins/minimap.esm.js';
 
 type TrackType = 'A' | 'B' | 'C';
 
@@ -14,6 +15,7 @@ const AudioCompare = () => {
   const [zoomLevel, setZoomLevel] = useState(1); // Default zoom level
   
   const waveformRef = useRef<HTMLDivElement>(null);
+  const minimapRef = useRef<HTMLDivElement>(null);
   const wavesurferRef = useRef<WaveSurfer | null>(null);
   const isChangingTrackRef = useRef(false);
   
@@ -64,7 +66,7 @@ const AudioCompare = () => {
     }
     
     // Only create if the container exists
-    if (!waveformRef.current) {
+    if (!waveformRef.current || !minimapRef.current) {
       isChangingTrackRef.current = false;
       setIsLoading(false);
       return;
@@ -74,7 +76,7 @@ const AudioCompare = () => {
       // Create a new instance with a direct file URL
       const audioUrl = createAudioFile(activeTrack);
       
-      // Initialize with zoom plugin
+      // Initialize with zoom and minimap plugins
       const wavesurfer = WaveSurfer.create({
         container: waveformRef.current,
         waveColor: '#6c757d',
@@ -93,6 +95,15 @@ const AudioCompare = () => {
             // Zoom plugin options
             maxZoom: 100, // Maximum zoom level
             scale: 0.5 // Amount to zoom on each step
+          }),
+          Minimap.create({
+            container: minimapRef.current,
+            waveColor: '#ddd',
+            progressColor: '#999',
+            height: 30,
+            barWidth: 2,
+            barGap: 1,
+            barRadius: 1
           })
         ]
       });
@@ -244,6 +255,9 @@ const AudioCompare = () => {
             <div className="text-gray-500">Loading {activeTrack}.mp3...</div>
           </div>
         )}
+        <div className="mt-2 w-full bg-gray-100 border border-gray-200 rounded p-1">
+          <div ref={minimapRef} className="w-full h-[30px]"></div>
+        </div>
         <div className="text-xs text-gray-400 text-right mt-1">
           Current Track: {activeTrack} | Time: {formatTime(currentTime)}
         </div>
