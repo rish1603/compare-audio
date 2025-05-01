@@ -10,6 +10,13 @@ type TrackType = 'A' | 'B' | 'C';
 // Pre-build audio URLs to avoid cache issues
 const getAudioUrl = (track: TrackType) => `/${track}.mp3?v=${Date.now()}`;
 
+// Loading status types for detailed feedback
+type LoadingStage = 
+  | 'initializing' 
+  | 'loading-audio' 
+  | 'generating-waveform'
+  | 'ready';
+
 const AudioCompare = () => {
   const [activeTrack, setActiveTrack] = useState<TrackType>('A');
   const [isPlaying, setIsPlaying] = useState(false);
@@ -20,6 +27,13 @@ const AudioCompare = () => {
     A: false,
     B: false,
     C: false
+  });
+  
+  // Track detailed loading status for better user feedback
+  const [loadingStatus, setLoadingStatus] = useState<Record<TrackType, LoadingStage>>({
+    A: 'initializing',
+    B: 'initializing',
+    C: 'initializing'
   });
   
   // Refs for multiple waveform containers
@@ -95,6 +109,12 @@ const AudioCompare = () => {
           setIsLoading(true);
         }
         
+        // Update loading status to loading audio
+        setLoadingStatus(prev => ({
+          ...prev,
+          [track]: 'loading-audio'
+        }));
+        
         // Build full URL with cache buster to avoid caching issues
         const audioUrl = getAudioUrl(track);
         
@@ -132,6 +152,18 @@ const AudioCompare = () => {
         // Store the instance immediately so we can reference it
         wavesurferRefs.current[track] = wavesurfer;
         
+        // Add loading events for user feedback
+        wavesurfer.on('loading', (percent: number) => {
+          console.log(`Loading track ${track}: ${percent}%`);
+          
+          if (percent >= 100) {
+            setLoadingStatus(prev => ({
+              ...prev,
+              [track]: 'generating-waveform'
+            }));
+          }
+        });
+        
         // Track ready event
         wavesurfer.on('ready', () => {
           console.log(`Track ${track} ready`);
@@ -142,6 +174,11 @@ const AudioCompare = () => {
             [track]: true
           }));
           trackLoadedRef.current[track] = true;
+          
+          setLoadingStatus(prev => ({
+            ...prev,
+            [track]: 'ready'
+          }));
           
           // Apply zoom after audio is loaded and we know it's ready
           try {
@@ -357,6 +394,31 @@ const AudioCompare = () => {
     return `${minutes}:${seconds.toString().padStart(2, '0')}`;
   };
   
+  // Calculate overall loading progress for display
+  const getLoadingMessage = () => {
+    const loadingTrack = Object.entries(loadingStatus).find(([track, status]) => 
+      status !== 'ready'
+    );
+    
+    if (!loadingTrack) return null;
+    
+    const [track, status] = loadingTrack;
+    
+    switch (status) {
+      case 'initializing':
+        return `Initializing Track ${track}...`;
+      case 'loading-audio':
+        return `Loading ${track}.mp3 audio data...`;
+      case 'generating-waveform':
+        return `Generating Track ${track} waveform...`;
+      default:
+        return `Processing Track ${track}...`;
+    }
+  };
+  
+  // Count how many tracks are fully ready
+  const readyTracksCount = Object.values(loadingStatus).filter(status => status === 'ready').length;
+  
   return (
     <div className="w-full max-w-4xl mx-auto">
       <div className="flex justify-center space-x-4 mb-8">
@@ -376,10 +438,31 @@ const AudioCompare = () => {
                 : ''}
             `}
           >
-            {track} {(!tracksInitialized[track] || !trackLoadedRef.current[track]) && '...'}
+            {track} 
+            {loadingStatus[track] !== 'ready' && (
+              <span className="ml-1 text-xs">
+                {loadingStatus[track] === 'initializing' && '⋯'}
+                {loadingStatus[track] === 'loading-audio' && '↓'}
+                {loadingStatus[track] === 'generating-waveform' && '⟳'}
+              </span>
+            )}
           </button>
         ))}
       </div>
+      
+      {/* Loading progress indicator */}
+      {readyTracksCount < 3 && (
+        <div className="mb-4 text-center">
+          <div className="inline-block px-4 py-2 bg-blue-50 border border-blue-200 rounded-lg">
+            <div className="text-blue-800 font-medium">
+              {getLoadingMessage() || 'Processing audio...'}
+            </div>
+            <div className="mt-1 text-xs text-blue-600">
+              {readyTracksCount} of 3 tracks ready
+            </div>
+          </div>
+        </div>
+      )}
       
       <div className="bg-gray-50 p-4 rounded-lg border border-gray-200 mb-4 min-h-[250px] flex flex-col">
         {/* Waveform containers */}
