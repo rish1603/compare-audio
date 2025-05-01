@@ -279,9 +279,10 @@ const AudioCompare = () => {
         
         // Handle track completion - stop playback
         wavesurfer.on('finish', () => {
-          if (track === activeTrack && isPlaying) {
-            setIsPlaying(false);
-          }
+          setIsPlaying(false);
+          // Update the global position to the end
+          globalPositionRef.current = wavesurfer.getDuration();
+          setCurrentTime(wavesurfer.getDuration());
         });
         
         // Handle seeking - update the time display
