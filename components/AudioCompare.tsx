@@ -7,204 +7,348 @@ import Minimap from 'wavesurfer.js/dist/plugins/minimap.esm.js';
 
 type TrackType = 'A' | 'B' | 'C';
 
+// Pre-build audio URLs to avoid cache issues
+const getAudioUrl = (track: TrackType) => `/${track}.mp3?v=${Date.now()}`;
+
 const AudioCompare = () => {
   const [activeTrack, setActiveTrack] = useState<TrackType>('A');
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
   const [zoomLevel, setZoomLevel] = useState(1); // Default zoom level
+  const [tracksInitialized, setTracksInitialized] = useState<Record<TrackType, boolean>>({
+    A: false,
+    B: false,
+    C: false
+  });
   
-  const waveformRef = useRef<HTMLDivElement>(null);
-  const minimapRef = useRef<HTMLDivElement>(null);
-  const wavesurferRef = useRef<WaveSurfer | null>(null);
-  const isChangingTrackRef = useRef(false);
+  // Refs for multiple waveform containers
+  const waveformRefs = useRef<Record<TrackType, HTMLDivElement | null>>({
+    A: null,
+    B: null,
+    C: null
+  });
   
-  // Use a single global position instead of track-specific positions
+  // Refs for multiple minimap containers
+  const minimapRefs = useRef<Record<TrackType, HTMLDivElement | null>>({
+    A: null,
+    B: null,
+    C: null
+  });
+  
+  // Refs for multiple wavesurfer instances
+  const wavesurferRefs = useRef<Record<TrackType, WaveSurfer | null>>({
+    A: null,
+    B: null,
+    C: null
+  });
+  
+  // Track loading states separately from initialization
+  const trackLoadedRef = useRef<Record<TrackType, boolean>>({
+    A: false,
+    B: false,
+    C: false
+  });
+  
+  // Use a single global position to sync tracks
   const globalPositionRef = useRef(0);
-  
-  // Create separate audio files for each track to avoid blob URL issues
-  const createAudioFile = (track: TrackType): string => {
-    return `/${track}.mp3?nocache=${Date.now()}`;
-  };
-  
-  // Track current time with manual polling to avoid circular updates
-  useEffect(() => {
-    const interval = setInterval(() => {
-      if (wavesurferRef.current && !isChangingTrackRef.current) {
-        try {
-          const time = wavesurferRef.current.getCurrentTime();
-          setCurrentTime(time);
-          
-          // Store current time as the global position
-          globalPositionRef.current = time;
-        } catch (e) {
-          // Ignore errors during time tracking
+  const isChangingTrack = useRef(false);
+
+  // Apply zoom to a single track
+  const applyZoomToTrack = (track: TrackType) => {
+    try {
+      const wavesurfer = wavesurferRefs.current[track];
+      if (wavesurfer && tracksInitialized[track] && trackLoadedRef.current[track]) {
+        // Check if audio is actually loaded before attempting to zoom
+        if (wavesurfer.getDuration() > 0) {
+          wavesurfer.zoom(zoomLevel);
         }
       }
-    }, 250);
-    
-    return () => clearInterval(interval);
-  }, [activeTrack]);
-  
-  // Handle track changes and wavesurfer initialization
-  useEffect(() => {
-    isChangingTrackRef.current = true;
-    setIsLoading(true);
-    
-    // Save global position if we have a wavesurfer instance
-    if (wavesurferRef.current) {
-      try {
-        // Store the current time as global position
-        globalPositionRef.current = wavesurferRef.current.getCurrentTime();
-        
-        // Destroy the previous instance
-        wavesurferRef.current.destroy();
-        wavesurferRef.current = null;
-      } catch (error) {
-        console.error("Error destroying previous wavesurfer:", error);
-      }
+    } catch (error) {
+      console.error(`Error applying zoom to ${track}:`, error);
     }
+  };
+  
+  // Create all wavesurfer instances on mount
+  useEffect(() => {
+    // Function to initialize a track
+    const initializeTrack = async (track: TrackType) => {
+      // Skip if already initialized or containers aren't ready
+      if (tracksInitialized[track] || !waveformRefs.current[track] || !minimapRefs.current[track]) {
+        return;
+      }
+      
+      // Clean up any existing instances for this track
+      if (wavesurferRefs.current[track]) {
+        try {
+          wavesurferRefs.current[track]!.destroy();
+          wavesurferRefs.current[track] = null;
+          trackLoadedRef.current[track] = false;
+        } catch (e) {
+          console.error(`Error cleaning up existing instance for ${track}:`, e);
+        }
+      }
+      
+      try {
+        // Set the loading state for this track
+        if (track === activeTrack) {
+          setIsLoading(true);
+        }
+        
+        // Build full URL with cache buster to avoid caching issues
+        const audioUrl = getAudioUrl(track);
+        
+        // Create wavesurfer instance with proper settings
+        const wavesurfer = WaveSurfer.create({
+          container: waveformRefs.current[track]!,
+          waveColor: '#6c757d',
+          progressColor: '#4F4A85',
+          height: 150,
+          cursorColor: '#333',
+          cursorWidth: 2,
+          barWidth: 2,
+          barGap: 1,
+          barRadius: 2,
+          responsive: true,
+          minPxPerSec: 50,
+          url: audioUrl,
+          plugins: [
+            Zoom.create({
+              maxZoom: 100,
+              scale: 0.5
+            }),
+            Minimap.create({
+              container: minimapRefs.current[track]!,
+              waveColor: '#ddd',
+              progressColor: '#999',
+              height: 30,
+              barWidth: 2,
+              barGap: 1,
+              barRadius: 1
+            })
+          ]
+        });
+        
+        // Store the instance immediately so we can reference it
+        wavesurferRefs.current[track] = wavesurfer;
+        
+        // Track ready event
+        wavesurfer.on('ready', () => {
+          console.log(`Track ${track} ready`);
+          
+          // Mark this track as initialized and loaded
+          setTracksInitialized(prev => ({
+            ...prev,
+            [track]: true
+          }));
+          trackLoadedRef.current[track] = true;
+          
+          // Apply zoom after audio is loaded and we know it's ready
+          try {
+            wavesurfer.zoom(zoomLevel);
+          } catch (e) {
+            console.error(`Error applying zoom to ${track} after load:`, e);
+          }
+          
+          // If this is the active track, mark loading as complete
+          if (track === activeTrack) {
+            setIsLoading(false);
+          }
+          
+          // Hide all tracks except the active one
+          if (track !== activeTrack && waveformRefs.current[track]) {
+            waveformRefs.current[track]!.style.display = 'none';
+            minimapRefs.current[track]!.style.display = 'none';
+          }
+        });
+        
+        // Event handlers
+        wavesurfer.on('play', () => {
+          if (track === activeTrack && !isPlaying) {
+            setIsPlaying(true);
+          }
+        });
+        
+        wavesurfer.on('pause', () => {
+          if (track === activeTrack && isPlaying) {
+            setIsPlaying(false);
+          }
+        });
+        
+        wavesurfer.on('finish', () => {
+          if (track === activeTrack && isPlaying) {
+            setIsPlaying(false);
+          }
+        });
+        
+        wavesurfer.on('timeupdate', (time: number) => {
+          if (track === activeTrack && !isChangingTrack.current) {
+            setCurrentTime(time);
+            globalPositionRef.current = time;
+          }
+        });
+        
+        wavesurfer.on('error', (err: Error) => {
+          console.error(`Wavesurfer error for track ${track}:`, err);
+          if (track === activeTrack) {
+            setIsLoading(false);
+          }
+        });
+      } catch (error) {
+        console.error(`Error initializing track ${track}:`, error);
+        if (track === activeTrack) {
+          setIsLoading(false);
+        }
+      }
+    };
     
-    // Only create if the container exists
-    if (!waveformRef.current || !minimapRef.current) {
-      isChangingTrackRef.current = false;
-      setIsLoading(false);
+    // Initialize all tracks
+    const tracks: TrackType[] = ['A', 'B', 'C'];
+    tracks.forEach(initializeTrack);
+    
+    // Clean up all instances on unmount
+    return () => {
+      Object.entries(wavesurferRefs.current).forEach(([track, wavesurfer]) => {
+        if (wavesurfer) {
+          try {
+            wavesurfer.destroy();
+          } catch (e) {
+            console.error(`Error destroying ${track}:`, e);
+          }
+        }
+      });
+    };
+  }, []); // Only run on mount, not on every activeTrack change
+  
+  // Apply zoom level changes separately
+  useEffect(() => {
+    // Only try to apply zoom to initialized tracks
+    Object.keys(tracksInitialized)
+      .filter(track => tracksInitialized[track as TrackType] && trackLoadedRef.current[track as TrackType])
+      .forEach(track => {
+        applyZoomToTrack(track as TrackType);
+      });
+  }, [zoomLevel, tracksInitialized]);
+  
+  // Handle play/pause state changes
+  useEffect(() => {
+    const wavesurfer = wavesurferRefs.current[activeTrack];
+    
+    if (!wavesurfer || !tracksInitialized[activeTrack] || isChangingTrack.current || !trackLoadedRef.current[activeTrack]) {
       return;
     }
     
     try {
-      // Create a new instance with a direct file URL
-      const audioUrl = createAudioFile(activeTrack);
-      
-      // Initialize with zoom and minimap plugins
-      const wavesurfer = WaveSurfer.create({
-        container: waveformRef.current,
-        waveColor: '#6c757d',
-        progressColor: '#4F4A85',
-        height: 150,
-        cursorColor: '#333',
-        cursorWidth: 2,
-        barWidth: 2,
-        barGap: 1,
-        barRadius: 2,
-        responsive: true,
-        minPxPerSec: 50, // Default zoom level
-        url: audioUrl, // Use URL directly instead of media element
-        plugins: [
-          Zoom.create({
-            // Zoom plugin options
-            maxZoom: 100, // Maximum zoom level
-            scale: 0.5 // Amount to zoom on each step
-          }),
-          Minimap.create({
-            container: minimapRef.current,
-            waveColor: '#ddd',
-            progressColor: '#999',
-            height: 30,
-            barWidth: 2,
-            barGap: 1,
-            barRadius: 1
-          })
-        ]
-      });
-      
-      // Set up event listeners
-      wavesurfer.on('ready', () => {
-        // Apply zoom level after the track is loaded
-        wavesurfer.zoom(zoomLevel);
-        
-        // Apply the global position to this track
-        if (globalPositionRef.current > 0) {
-          const duration = wavesurfer.getDuration() || 1;
-          // Avoid seeking too close to the end which can cause issues
-          const seekPos = Math.min(globalPositionRef.current / duration, 0.99);
-          wavesurfer.seekTo(seekPos);
-        }
-        
-        // Resume playing if it was playing before
-        if (isPlaying) {
-          wavesurfer.play();
-        }
-        
-        setIsLoading(false);
-        isChangingTrackRef.current = false;
-      });
-      
-      // Use one-way data flow for play/pause state to avoid loops
-      wavesurfer.on('play', () => {
-        if (!isPlaying) setIsPlaying(true);
-      });
-      
-      wavesurfer.on('pause', () => {
-        if (isPlaying) setIsPlaying(false);
-      });
-      
-      wavesurfer.on('finish', () => {
-        if (isPlaying) setIsPlaying(false);
-      });
-      
-      wavesurfer.on('error', (err: Error) => {
-        console.error(`Wavesurfer error for track ${activeTrack}:`, err);
-        setIsLoading(false);
-        isChangingTrackRef.current = false;
-      });
-      
-      // Store the instance
-      wavesurferRef.current = wavesurfer;
-    } catch (error) {
-      console.error("Error initializing wavesurfer:", error);
-      setIsLoading(false);
-      isChangingTrackRef.current = false;
-    }
-    
-    // Clean up on unmount
-    return () => {
-      try {
-        if (wavesurferRef.current) {
-          wavesurferRef.current.destroy();
-          wavesurferRef.current = null;
-        }
-      } catch (error) {
-        console.error("Error cleaning up:", error);
+      if (isPlaying && !wavesurfer.isPlaying()) {
+        wavesurfer.play();
+      } else if (!isPlaying && wavesurfer.isPlaying()) {
+        wavesurfer.pause();
       }
-    };
-  }, [activeTrack, isPlaying, zoomLevel]);
-  
-  // Handle play state changes separately
-  useEffect(() => {
-    if (!wavesurferRef.current || isChangingTrackRef.current) return;
-    
-    if (isPlaying && !wavesurferRef.current.isPlaying()) {
-      wavesurferRef.current.play();
-    } else if (!isPlaying && wavesurferRef.current.isPlaying()) {
-      wavesurferRef.current.pause();
+    } catch (error) {
+      console.error(`Error controlling playback for track ${activeTrack}:`, error);
     }
-  }, [isPlaying]);
+  }, [isPlaying, activeTrack, tracksInitialized]);
   
   // Handle track switching
   const handleTrackSwitch = (track: TrackType) => {
-    if (track === activeTrack || isChangingTrackRef.current) return;
-    
-    // Store global position before switching
-    if (wavesurferRef.current) {
-      try {
-        globalPositionRef.current = wavesurferRef.current.getCurrentTime();
-      } catch (error) {
-        console.error("Error getting current time:", error);
-      }
+    if (track === activeTrack || isChangingTrack.current) return;
+    if (!tracksInitialized[track] || !trackLoadedRef.current[track]) {
+      // Don't switch to uninitialized track
+      console.log(`Can't switch to track ${track} - not ready yet`);
+      return;
     }
     
-    // Switch tracks
-    setActiveTrack(track);
+    isChangingTrack.current = true;
+    setIsLoading(true); // Show loading indicator when switching
+    
+    try {
+      // Pause current track if playing
+      const currentWavesurfer = wavesurferRefs.current[activeTrack];
+      if (currentWavesurfer && trackLoadedRef.current[activeTrack]) {
+        try {
+          if (currentWavesurfer.isPlaying()) {
+            currentWavesurfer.pause();
+          }
+          
+          // Store current position to global position
+          globalPositionRef.current = currentWavesurfer.getCurrentTime();
+        } catch (e) {
+          console.error(`Error pausing track ${activeTrack}:`, e);
+        }
+        
+        // Hide current track
+        if (waveformRefs.current[activeTrack]) {
+          waveformRefs.current[activeTrack]!.style.display = 'none';
+          minimapRefs.current[activeTrack]!.style.display = 'none';
+        }
+      }
+      
+      // Show new track
+      if (waveformRefs.current[track]) {
+        waveformRefs.current[track]!.style.display = 'block';
+        minimapRefs.current[track]!.style.display = 'block';
+      }
+      
+      // Set position of new track to match global position
+      const newWavesurfer = wavesurferRefs.current[track];
+      if (newWavesurfer && trackLoadedRef.current[track]) {
+        try {
+          // Make sure we have a duration (audio is loaded)
+          if (newWavesurfer.getDuration() > 0) {
+            const duration = newWavesurfer.getDuration();
+            const seekPos = Math.min(globalPositionRef.current / duration, 0.99);
+            
+            // Seek to position
+            newWavesurfer.seekTo(seekPos);
+            
+            // Continue playing if was playing
+            if (isPlaying) {
+              // Small delay to avoid issues
+              setTimeout(() => {
+                try {
+                  newWavesurfer.play();
+                } catch (e) {
+                  console.error(`Error playing track ${track} after switch:`, e);
+                }
+              }, 100);
+            }
+          }
+        } catch (e) {
+          console.error(`Error seeking track ${track}:`, e);
+        }
+      }
+      
+      // Update active track
+      setActiveTrack(track);
+    } catch (error) {
+      console.error('Error switching tracks:', error);
+    } finally {
+      setTimeout(() => {
+        isChangingTrack.current = false;
+        setIsLoading(false);  
+      }, 200);
+    }
   };
   
-  // Toggle play/pause
+  // Toggle play/pause for active track
   const togglePlayPause = () => {
-    if (isLoading || isChangingTrackRef.current) return;
-    setIsPlaying(!isPlaying);
+    if (isChangingTrack.current) return;
+    
+    const wavesurfer = wavesurferRefs.current[activeTrack];
+    if (!wavesurfer || !tracksInitialized[activeTrack] || !trackLoadedRef.current[activeTrack]) return;
+    
+    try {
+      if (isPlaying) {
+        wavesurfer.pause();
+      } else {
+        wavesurfer.play();
+      }
+    } catch (error) {
+      console.error(`Error toggling playback:`, error);
+    }
   };
   
-  // Format time display (MM:SS)
+  // Format time display
   const formatTime = (time: number) => {
     const minutes = Math.floor(time / 60);
     const seconds = Math.floor(time % 60);
@@ -218,31 +362,66 @@ const AudioCompare = () => {
           <button
             key={track}
             onClick={() => handleTrackSwitch(track)}
-            disabled={isLoading && track !== activeTrack}
+            disabled={!tracksInitialized[track] || !trackLoadedRef.current[track] || (isLoading && track !== activeTrack)}
             className={`
               w-32 h-16 text-xl font-bold border-2 rounded-md
               transition-colors duration-200 flex items-center justify-center
               ${activeTrack === track 
                 ? 'border-green-500 bg-green-100 text-green-800' 
                 : 'border-gray-300 bg-white text-gray-800 hover:bg-gray-100'}
-              ${isLoading && track !== activeTrack ? 'opacity-50 cursor-not-allowed' : ''}
+              ${(!tracksInitialized[track] || !trackLoadedRef.current[track] || (isLoading && track !== activeTrack)) 
+                ? 'opacity-50 cursor-not-allowed' 
+                : ''}
             `}
           >
-            {track}
+            {track} {(!tracksInitialized[track] || !trackLoadedRef.current[track]) && '...'}
           </button>
         ))}
       </div>
       
-      <div className="bg-gray-50 p-4 rounded-lg border border-gray-200 mb-4 min-h-[200px] flex flex-col">
-        <div ref={waveformRef} className="w-full flex-1"></div>
+      <div className="bg-gray-50 p-4 rounded-lg border border-gray-200 mb-4 min-h-[250px] flex flex-col">
+        {/* Waveform containers */}
+        <div className="w-full" style={{ height: '150px' }}>
+          {(['A', 'B', 'C'] as TrackType[]).map((track) => (
+            <div 
+              key={`waveform-${track}`}
+              ref={(el) => {
+                waveformRefs.current[track] = el;
+                return undefined;
+              }}
+              className="w-full h-full"
+              style={{ 
+                display: activeTrack === track ? 'block' : 'none',
+              }}
+            />
+          ))}
+        </div>
+        
         {isLoading && (
-          <div className="flex justify-center py-4">
+          <div className="flex justify-center py-2 mt-2">
             <div className="text-gray-500">Loading {activeTrack}.mp3...</div>
           </div>
         )}
-        <div className="mt-2 w-full bg-gray-100 border border-gray-200 rounded p-1">
-          <div ref={minimapRef} className="w-full h-[30px]"></div>
+        
+        {/* Minimap containers */}
+        <div className="mt-4 w-full bg-gray-100 border border-gray-200 rounded p-1">
+          <div className="w-full" style={{ height: '30px' }}>
+            {(['A', 'B', 'C'] as TrackType[]).map((track) => (
+              <div 
+                key={`minimap-${track}`}
+                ref={(el) => {
+                  minimapRefs.current[track] = el;
+                  return undefined;
+                }}
+                className="w-full h-full"
+                style={{ 
+                  display: activeTrack === track ? 'block' : 'none',
+                }}
+              />
+            ))}
+          </div>
         </div>
+        
         <div className="text-xs text-gray-400 text-right mt-1">
           Current Track: {activeTrack} | Time: {formatTime(currentTime)}
         </div>
@@ -255,16 +434,22 @@ const AudioCompare = () => {
         
         <button
           onClick={togglePlayPause}
-          disabled={isLoading}
+          disabled={isLoading || !tracksInitialized[activeTrack] || !trackLoadedRef.current[activeTrack]}
           className={`
             px-6 py-2 rounded-md transition-colors duration-200 text-white
-            ${!isLoading
+            ${(!isLoading && tracksInitialized[activeTrack] && trackLoadedRef.current[activeTrack])
               ? 'bg-blue-600 hover:bg-blue-700 cursor-pointer' 
               : 'bg-blue-300 cursor-not-allowed'}
           `}
         >
           {isPlaying ? 'Pause' : 'Play'}
         </button>
+        
+        {Object.values(tracksInitialized).some((v, i) => !v || !trackLoadedRef.current[(['A', 'B', 'C'] as TrackType[])[i]]) && (
+          <div className="text-xs text-gray-500">
+            Initializing tracks...
+          </div>
+        )}
       </div>
     </div>
   );
