@@ -83,6 +83,9 @@ const AudioCompare = () => {
   // Use a single global position to sync tracks
   const globalPositionRef = useRef(0);
   const isChangingTrack = useRef(false);
+  
+  // Ref for the timer interval
+  const timeIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   // Apply zoom to a single track
   const applyZoomToTrack = (track: TrackType) => {
@@ -98,6 +101,42 @@ const AudioCompare = () => {
       console.error(`Error applying zoom to ${track}:`, error);
     }
   };
+  
+  // Function to update time display
+  const updateTimeDisplay = () => {
+    if (isChangingTrack.current) return;
+    
+    try {
+      const wavesurfer = wavesurferRefs.current[activeTrack];
+      if (wavesurfer && trackLoadedRef.current[activeTrack]) {
+        const time = wavesurfer.getCurrentTime();
+        setCurrentTime(time);
+        globalPositionRef.current = time;
+      }
+    } catch (error) {
+      console.error('Error updating time:', error);
+    }
+  };
+  
+  // Set up a continuous timer for time display
+  useEffect(() => {
+    // Clear any existing interval
+    if (timeIntervalRef.current) {
+      clearInterval(timeIntervalRef.current);
+      timeIntervalRef.current = null;
+    }
+    
+    // Create a new interval
+    timeIntervalRef.current = setInterval(updateTimeDisplay, 250);
+    
+    // Clean up on unmount
+    return () => {
+      if (timeIntervalRef.current) {
+        clearInterval(timeIntervalRef.current);
+        timeIntervalRef.current = null;
+      }
+    };
+  }, [activeTrack]); // Only reset when active track changes
   
   // Create all wavesurfer instances on mount
   useEffect(() => {
@@ -154,6 +193,10 @@ const AudioCompare = () => {
           responsive: true,
           minPxPerSec: 50,
           url: audioUrl,
+          // Enable touch interaction for mobile devices
+          interact: true,
+          // Improve mobile experience
+          dragToSeek: true,
           plugins: [
             Zoom.create({
               maxZoom: 100,
@@ -234,11 +277,19 @@ const AudioCompare = () => {
           }
         });
         
+        // Handle track completion - stop playback
         wavesurfer.on('finish', () => {
-          setIsPlaying(false);
-          // Update the global position to the end
-          globalPositionRef.current = wavesurfer.getDuration();
-          setCurrentTime(wavesurfer.getDuration());
+          if (track === activeTrack && isPlaying) {
+            setIsPlaying(false);
+          }
+        });
+        
+        // Handle seeking - update the time display
+        wavesurfer.on('seeking', (time: number) => {
+          if (track === activeTrack) {
+            setCurrentTime(time);
+            globalPositionRef.current = time;
+          }
         });
         
         wavesurfer.on('timeupdate', (time: number) => {
@@ -246,6 +297,11 @@ const AudioCompare = () => {
             setCurrentTime(time);
             globalPositionRef.current = time;
           }
+        });
+        
+        // Add interaction events for mobile
+        wavesurfer.on('interaction', () => {
+          updateTimeDisplay();
         });
         
         wavesurfer.on('error', (err: Error) => {
@@ -269,6 +325,12 @@ const AudioCompare = () => {
     // Clean up all instances on unmount
     return () => {
       clearTimeout(loadingTimeout);
+      
+      if (timeIntervalRef.current) {
+        clearInterval(timeIntervalRef.current);
+        timeIntervalRef.current = null;
+      }
+      
       Object.entries(wavesurferRefs.current).forEach(([track, wavesurfer]) => {
         if (wavesurfer) {
           try {
@@ -373,6 +435,22 @@ const AudioCompare = () => {
                 }
               }, 100);
             }
+            
+            // Special fix for mobile Safari:
+            // On iOS Safari, sometimes touch events need to be "re-enabled" after display changes
+            setTimeout(() => {
+              try {
+                // Force a redraw of the waveform
+                if (newWavesurfer) {
+                  // Re-draw the waveform to ensure touch events are properly bound
+                  const currentZoom = zoomLevel;
+                  newWavesurfer.zoom(currentZoom + 0.1);
+                  setTimeout(() => newWavesurfer.zoom(currentZoom), 10);
+                }
+              } catch (e) {
+                console.error(`Error refreshing mobile touch events:`, e);
+              }
+            }, 300);
           }
         } catch (e) {
           console.error(`Error seeking track ${track}:`, e);
@@ -381,13 +459,16 @@ const AudioCompare = () => {
       
       // Update active track
       setActiveTrack(track);
+      
+      // Force a time display update after track switch
+      setTimeout(updateTimeDisplay, 300);
     } catch (error) {
       console.error('Error switching tracks:', error);
     } finally {
       setTimeout(() => {
         isChangingTrack.current = false;
         setIsLoading(false);  
-      }, 200);
+      }, 300); // Increased timeout to ensure mobile has time to process
     }
   };
   
@@ -442,27 +523,6 @@ const AudioCompare = () => {
   
   // Count how many tracks are fully ready
   const readyTracksCount = Object.values(loadingStatus).filter(status => status === 'ready').length;
-  
-  // Sync time display with active wavesurfer instance
-  useEffect(() => {
-    if (!isChangingTrack.current && wavesurferRefs.current[activeTrack] && trackLoadedRef.current[activeTrack]) {
-      // Set up a timer to update the current time
-      const timeUpdateInterval = setInterval(() => {
-        try {
-          const wavesurfer = wavesurferRefs.current[activeTrack];
-          if (wavesurfer && wavesurfer.isPlaying()) {
-            const time = wavesurfer.getCurrentTime();
-            setCurrentTime(time);
-            globalPositionRef.current = time;
-          }
-        } catch (error) {
-          console.error('Error updating time:', error);
-        }
-      }, 250); // Update 4 times per second
-      
-      return () => clearInterval(timeUpdateInterval);
-    }
-  }, [activeTrack, isPlaying]);
   
   return (
     <div className="w-full max-w-4xl mx-auto">
@@ -519,7 +579,7 @@ const AudioCompare = () => {
                 waveformRefs.current[track] = el;
                 return undefined;
               }}
-              className="w-full h-full"
+              className="w-full h-full touch-manipulation"
               style={{ 
                 display: activeTrack === track ? 'block' : 'none',
               }}
@@ -537,7 +597,7 @@ const AudioCompare = () => {
                   minimapRefs.current[track] = el;
                   return undefined;
                 }}
-                className="w-full h-full"
+                className="w-full h-full touch-manipulation"
                 style={{ 
                   display: activeTrack === track ? 'block' : 'none',
                 }}
