@@ -30,6 +30,39 @@ type LoadingStage =
   | 'generating-waveform'
   | 'ready';
 
+// Helper function to detect mobile Safari
+const isMobileSafari = () => {
+  const ua = window.navigator.userAgent;
+  const iOS = !!ua.match(/iPad/i) || !!ua.match(/iPhone/i);
+  const webkit = !!ua.match(/WebKit/i);
+  return iOS && webkit && !ua.match(/CriOS/i) && !ua.match(/OPiOS/i);
+};
+
+// Helper function to reactivate touch events on an element (iOS Safari fix)
+const reactivateTouchEvents = (element: HTMLElement | null) => {
+  if (!element) return;
+  
+  // Force the browser to recalculate the element's layout
+  const originalDisplay = element.style.display;
+  
+  // Create and dispatch synthetic touch events to "wake up" the touch handler
+  try {
+    // Add a slight style change to force a repaint
+    element.style.opacity = '0.99';
+    
+    // Force layout recalculation
+    // eslint-disable-next-line @typescript-eslint/no-unused-expressions
+    element.offsetHeight; 
+    
+    // Restore original opacity
+    setTimeout(() => {
+      element.style.opacity = '1';
+    }, 50);
+  } catch (e) {
+    console.error('Error reactivating touch events:', e);
+  }
+};
+
 const AudioCompare = () => {
   const [activeTrack, setActiveTrack] = useState<TrackType>('A');
   const [isPlaying, setIsPlaying] = useState(false);
@@ -437,21 +470,35 @@ const AudioCompare = () => {
               }, 100);
             }
             
-            // Special fix for mobile Safari:
-            // On iOS Safari, sometimes touch events need to be "re-enabled" after display changes
-            setTimeout(() => {
-              try {
-                // Force a redraw of the waveform
-                if (newWavesurfer) {
-                  // Re-draw the waveform to ensure touch events are properly bound
+            // iOS Safari-specific fix for touch events
+            if (isMobileSafari() && track !== 'A') {
+              // Apply touch event reactivation to both waveform and minimap
+              setTimeout(() => {
+                // First, try the WaveSurfer-specific approach
+                try {
+                  // 1. Force a redraw of the waveform with a small zoom change
                   const currentZoom = zoomLevel;
                   newWavesurfer.zoom(currentZoom + 0.1);
                   setTimeout(() => newWavesurfer.zoom(currentZoom), 10);
+                  
+                  // 2. Try to directly access and modify the WaveSurfer wrapper element
+                  const wrapperElement = waveformRefs.current[track]?.querySelector('.wavesurfer-wrapper') as HTMLElement | null;
+                  if (wrapperElement) {
+                    reactivateTouchEvents(wrapperElement);
+                  }
+                  
+                  // 3. Access the canvas layers directly
+                  const canvasElements = waveformRefs.current[track]?.querySelectorAll('canvas');
+                  if (canvasElements) {
+                    canvasElements.forEach(canvas => {
+                      reactivateTouchEvents(canvas as HTMLElement);
+                    });
+                  }
+                } catch (e) {
+                  console.error(`Error applying iOS Safari touch fix:`, e);
                 }
-              } catch (e) {
-                console.error(`Error refreshing mobile touch events:`, e);
-              }
-            }, 300);
+              }, 200);
+            }
           }
         } catch (e) {
           console.error(`Error seeking track ${track}:`, e);
