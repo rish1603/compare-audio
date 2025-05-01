@@ -8,7 +8,20 @@ import Minimap from 'wavesurfer.js/dist/plugins/minimap.esm.js';
 type TrackType = 'A' | 'B' | 'C';
 
 // Pre-build audio URLs to avoid cache issues
-const getAudioUrl = (track: TrackType) => `/${track}.mp3?v=${Date.now()}`;
+const getAudioUrl = (track: TrackType) => {
+  // In production, use a fixed version to enable browser caching
+  // In development, use timestamp to avoid cache during development
+  const isProduction = process.env.NODE_ENV === 'production';
+  
+  if (isProduction) {
+    // Use a fixed version string that you can update when audio changes
+    // This allows browsers to cache the audio files effectively
+    return `/${track}.mp3?v=1.0.0`;
+  } else {
+    // In development, use timestamp to avoid caching
+    return `/${track}.mp3?v=${Date.now()}`;
+  }
+};
 
 // Loading status types for detailed feedback
 type LoadingStage = 
