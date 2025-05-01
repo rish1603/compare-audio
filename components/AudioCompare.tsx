@@ -49,6 +49,9 @@ const AudioCompare = () => {
     C: 'initializing'
   });
   
+  // Add a state to delay showing loading indicators
+  const [showLoading, setShowLoading] = useState(false);
+  
   // Refs for multiple waveform containers
   const waveformRefs = useRef<Record<TrackType, HTMLDivElement | null>>({
     A: null,
@@ -98,6 +101,12 @@ const AudioCompare = () => {
   
   // Create all wavesurfer instances on mount
   useEffect(() => {
+    // Set a timeout to only show loading indicators after 1 second
+    // This prevents flickering for cached files
+    const loadingTimeout = setTimeout(() => {
+      setShowLoading(true);
+    }, 1000);
+    
     // Function to initialize a track
     const initializeTrack = async (track: TrackType) => {
       // Skip if already initialized or containers aren't ready
@@ -258,6 +267,7 @@ const AudioCompare = () => {
     
     // Clean up all instances on unmount
     return () => {
+      clearTimeout(loadingTimeout);
       Object.entries(wavesurferRefs.current).forEach(([track, wavesurfer]) => {
         if (wavesurfer) {
           try {
@@ -432,6 +442,27 @@ const AudioCompare = () => {
   // Count how many tracks are fully ready
   const readyTracksCount = Object.values(loadingStatus).filter(status => status === 'ready').length;
   
+  // Sync time display with active wavesurfer instance
+  useEffect(() => {
+    if (!isChangingTrack.current && wavesurferRefs.current[activeTrack] && trackLoadedRef.current[activeTrack]) {
+      // Set up a timer to update the current time
+      const timeUpdateInterval = setInterval(() => {
+        try {
+          const wavesurfer = wavesurferRefs.current[activeTrack];
+          if (wavesurfer && wavesurfer.isPlaying()) {
+            const time = wavesurfer.getCurrentTime();
+            setCurrentTime(time);
+            globalPositionRef.current = time;
+          }
+        } catch (error) {
+          console.error('Error updating time:', error);
+        }
+      }, 250); // Update 4 times per second
+      
+      return () => clearInterval(timeUpdateInterval);
+    }
+  }, [activeTrack, isPlaying]);
+  
   return (
     <div className="w-full max-w-4xl mx-auto">
       <div className="flex justify-center space-x-4 mb-8">
@@ -463,8 +494,8 @@ const AudioCompare = () => {
         ))}
       </div>
       
-      {/* Loading progress indicator */}
-      {readyTracksCount < 3 && (
+      {/* Loading progress indicator - only show after delay */}
+      {showLoading && readyTracksCount < 3 && (
         <div className="mb-4 text-center">
           <div className="inline-block px-4 py-2 bg-blue-50 border border-blue-200 rounded-lg">
             <div className="text-blue-800 font-medium">
@@ -495,12 +526,6 @@ const AudioCompare = () => {
           ))}
         </div>
         
-        {isLoading && (
-          <div className="flex justify-center py-2 mt-2">
-            <div className="text-gray-500">Loading {activeTrack}.mp3...</div>
-          </div>
-        )}
-        
         {/* Minimap containers */}
         <div className="mt-4 w-full bg-gray-100 border border-gray-200 rounded p-1">
           <div className="w-full" style={{ height: '30px' }}>
@@ -526,10 +551,6 @@ const AudioCompare = () => {
       </div>
       
       <div className="flex justify-center items-center gap-4">
-        <div className="text-gray-700 font-mono">
-          {formatTime(currentTime)}
-        </div>
-        
         <button
           onClick={togglePlayPause}
           disabled={isLoading || !tracksInitialized[activeTrack] || !trackLoadedRef.current[activeTrack]}
