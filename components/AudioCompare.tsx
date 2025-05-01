@@ -340,8 +340,10 @@ const AudioCompare = () => {
     try {
       if (isPlaying) {
         wavesurfer.pause();
+        setIsPlaying(false);
       } else {
         wavesurfer.play();
+        setIsPlaying(true);
       }
     } catch (error) {
       console.error(`Error toggling playback:`, error);
